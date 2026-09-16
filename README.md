@@ -8,7 +8,7 @@ The repository prioritizes clarity, correctness, extensibility, testability, and
 
 | Module | Focus |
 | --- | --- |
-| `rate-limiter` | Strategy-based, per-client token bucket |
+| `rate-limiter` | Five thread-safe, strategy-based per-client algorithms |
 | `parking-lot` | Typed spots, pluggable allocation, live occupancy |
 | `movie-ticket-booking` | Expiring seat locks and atomic booking |
 | `notification-system` | Multi-channel strategies and delivery observers |
@@ -44,27 +44,36 @@ Decide whether a client may consume one or more permits while enforcing a config
 | Algorithm | Status |
 | --- | --- |
 | Token bucket | Implemented |
-| Fixed window | Planned |
-| Sliding window | Planned |
+| Leaky bucket | Implemented |
+| Fixed window counter | Implemented |
+| Sliding window log | Implemented |
+| Sliding window counter | Implemented |
 
-The token bucket allows short bursts up to its capacity and replenishes permits continuously at the configured rate.
+- **Token bucket** allows bursts up to its capacity and replenishes permits continuously.
+- **Leaky bucket** bounds queued work and drains it at a constant rate.
+- **Fixed window counter** uses a compact counter that resets at aligned boundaries.
+- **Sliding window log** stores accepted request timestamps for an exact rolling-window decision.
+- **Sliding window counter** weights the previous and current counters for a memory-efficient approximation.
 
 #### Design approach
 
-`RateLimiterStrategy` is the algorithm boundary. `RateLimiterService` depends only on that interface and remains unchanged when a different implementation is supplied. `TokenBucketRateLimiter` owns per-client bucket state in a concurrent map. Configuration lives separately in the immutable `TokenBucketConfig` value object.
+`RateLimiterStrategy` is the algorithm boundary. `RateLimiterService` depends only on that interface and remains unchanged when a different implementation is supplied. Each implementation owns per-client state in a concurrent map. Algorithm configuration lives separately in immutable value objects.
 
 #### Important classes and interfaces
 
 - `RateLimitRequest` — immutable client ID and requested permit count.
 - `RateLimitResult` — immutable decision, remaining permits, and retry delay.
 - `RateLimiterStrategy` — common extension point for all algorithms.
-- `TokenBucketRateLimiter` — current thread-safe strategy.
-- `TokenBucketConfig` — capacity and refill-rate configuration.
+- `TokenBucketRateLimiter` and `LeakyBucketRateLimiter` — continuous refill/drain strategies.
+- `FixedWindowRateLimiter` — exact counter over aligned windows.
+- `SlidingWindowLogRateLimiter` — exact rolling-window strategy.
+- `SlidingWindowCounterRateLimiter` — weighted, constant-memory rolling-window strategy.
+- Configuration records — immutable capacity, rate, limit, and window settings.
 - `RateLimiterService` — client-facing facade using dependency inversion.
 
 #### Thread safety
 
-Client buckets are held in a `ConcurrentHashMap`. Each refill-and-consume decision is performed atomically with `compute`, preventing concurrent requests for the same client from overspending permits. Different clients can proceed independently. Configuration and API models are immutable.
+Per-client state is held in a `ConcurrentHashMap`. Each cleanup/refill and consume decision is performed atomically with `compute`, preventing concurrent requests for the same client from overspending permits. Different clients can proceed independently. Configuration and API models are immutable.
 
 ## Prerequisites
 
